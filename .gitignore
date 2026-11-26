@@ -1,0 +1,6 @@
+/bin/
+/hookprobe
+*.exe
+*.json.out
+hookprobe.json
+vulnerable.json

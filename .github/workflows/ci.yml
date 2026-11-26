@@ -1,0 +1,48 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Format
+        run: test -z "$(gofmt -l .)"
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
+      - name: Build
+        run: |
+          go build -o bin/hookprobe ./cmd/hookprobe
+          go build -o bin/vulnerable ./demo/vulnerable
+          go build -o bin/fixed ./demo/fixed
+
+      - name: Fixed receiver passes
+        run: |
+          bin/fixed -addr :8082 &
+          for i in $(seq 1 20); do curl -s localhost:8082/__hookprobe/events/x >/dev/null && break; sleep 0.25; done
+          bin/hookprobe --scheme hook --secret demo-secret http://localhost:8082/webhook
+
+      - name: Vulnerable receiver fails
+        run: |
+          bin/vulnerable -addr :8081 &
+          for i in $(seq 1 20); do curl -s localhost:8081/__hookprobe/events/x >/dev/null && break; sleep 0.25; done
+          set +e
+          bin/hookprobe --scheme hook --secret demo-secret --json http://localhost:8081/webhook > vulnerable.json
+          code=$?
+          set -e
+          echo "exit code $code"
+          test "$code" -eq 1
+          test "$(jq '.summary.fail' vulnerable.json)" -eq 6
