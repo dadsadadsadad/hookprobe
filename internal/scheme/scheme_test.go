@@ -37,6 +37,46 @@ func TestGitHubVector(t *testing.T) {
 	}
 }
 
+// Reference vector published by the Reliable Webhook Delivery Service in
+// docs/verifying-webhooks.md. If this breaks, HookProbe no longer speaks the
+// sender's format.
+func TestHookMatchesDeliveryServiceVector(t *testing.T) {
+	s, _ := Get("hook")
+	m := Message{ID: "evt_1", Type: "t", Timestamp: time.Unix(1700000000, 0), Body: []byte(`{"a":1}`)}
+	h, err := s.Sign(m, "whsec_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "v1,i3q9oCLRAysAHUE7eH0dnG37rbo27ip6kTM1afd3thw="
+	if got := h.Get("X-Hook-Signature"); got != want {
+		t.Fatalf("signature = %q, want %q", got, want)
+	}
+}
+
+func TestPayMongoModes(t *testing.T) {
+	m := Message{Timestamp: time.Unix(1496734173, 0), Body: []byte(`{"data":{}}`)}
+	test, _ := Get("paymongo")
+	live, _ := Get("paymongo-live")
+	ht, _ := test.Sign(m, "whsk_x")
+	hl, _ := live.Sign(m, "whsk_x")
+	tv, lv := ht.Get("Paymongo-Signature"), hl.Get("Paymongo-Signature")
+	sig := strings.TrimSuffix(strings.TrimPrefix(tv, "t=1496734173,te="), ",li=")
+	if len(sig) != 64 {
+		t.Fatalf("test-mode header %q", tv)
+	}
+	if lv != "t=1496734173,te=,li="+sig {
+		t.Fatalf("live-mode header %q, want the same signature under li", lv)
+	}
+}
+
+func TestXenditSendsTokenAsIs(t *testing.T) {
+	s, _ := Get("xendit")
+	h, _ := s.Sign(Message{Body: []byte(`{}`)}, "tok_123")
+	if h.Get("x-callback-token") != "tok_123" || s.BodySigned() {
+		t.Fatalf("unexpected %v", h)
+	}
+}
+
 func TestStripeFormat(t *testing.T) {
 	s, _ := Get("stripe")
 	m := Message{Timestamp: time.Unix(1700000000, 0), Body: []byte(`{}`)}

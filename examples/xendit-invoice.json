@@ -1,0 +1,16 @@
+{
+  "id": "{{id}}",
+  "external_id": "hookprobe-{{check}}",
+  "user_id": "hookprobe",
+  "is_high": false,
+  "status": "PAID",
+  "merchant_name": "HookProbe",
+  "amount": 10000,
+  "paid_amount": 10000,
+  "payment_method": "EWALLET",
+  "payment_channel": "GCASH",
+  "currency": "PHP",
+  "paid_at": "{{created_rfc3339}}",
+  "created": "{{created_rfc3339}}",
+  "updated": "{{created_rfc3339}}"
+}

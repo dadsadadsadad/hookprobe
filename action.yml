@@ -1,0 +1,67 @@
+name: HookProbe
+description: Test whether a webhook receiver rejects hostile requests. Fails the job if any check fails.
+branding:
+  icon: shield
+  color: red
+
+inputs:
+  url:
+    description: Receiver URL, e.g. http://localhost:8080/webhooks/stripe
+    required: true
+  scheme:
+    description: Signature format (stripe, github, standard-webhooks, hook, paymongo, paymongo-live, xendit)
+    required: true
+  secret:
+    description: Signing secret the receiver holds. Pass it from a repository secret.
+    required: true
+  args:
+    description: Extra flags, e.g. "--skip slow-body --body-file examples/stripe-event.json"
+    required: false
+    default: ""
+  version:
+    description: HookProbe version to install (a tag such as v0.2.0, or latest)
+    required: false
+    default: latest
+  report:
+    description: Path to write the JSON report to
+    required: false
+    default: hookprobe-report.json
+
+outputs:
+  passed:
+    description: '"true" when every check passed or was skipped'
+    value: ${{ steps.probe.outputs.passed }}
+  report:
+    description: Path of the JSON report
+    value: ${{ inputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v5
+      with:
+        go-version: stable
+        cache: false
+
+    - name: Install HookProbe
+      shell: bash
+      run: go install "github.com/dadsadadsadad/hookprobe/cmd/hookprobe@${{ inputs.version }}"
+
+    - name: Probe receiver
+      id: probe
+      shell: bash
+      env:
+        HOOKPROBE_SECRET: ${{ inputs.secret }}
+        HP_URL: ${{ inputs.url }}
+        HP_SCHEME: ${{ inputs.scheme }}
+        HP_ARGS: ${{ inputs.args }}
+        HP_REPORT: ${{ inputs.report }}
+      run: |
+        set +e
+        # Text report in the log, JSON report on disk. HP_ARGS is split on
+        # purpose so several flags can be passed in one input.
+        # shellcheck disable=SC2086
+        hookprobe --scheme "$HP_SCHEME" --json-file "$HP_REPORT" $HP_ARGS "$HP_URL"
+        code=$?
+        if [ "$code" -eq 0 ]; then echo "passed=true" >> "$GITHUB_OUTPUT"; else echo "passed=false" >> "$GITHUB_OUTPUT"; fi
+        exit "$code"

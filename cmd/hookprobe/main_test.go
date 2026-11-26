@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -60,6 +62,33 @@ func TestFlagsAfterURL(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "PASS   0  baseline") {
 		t.Fatalf("missing baseline line:\n%s", out.String())
+	}
+}
+
+func TestJSONFileKeepsTextOnStdout(t *testing.T) {
+	srv := acceptAll()
+	defer srv.Close()
+	path := filepath.Join(t.TempDir(), "r.json")
+	var out, errOut bytes.Buffer
+	run([]string{"--scheme", "hook", "--secret", "s", "--only", "1", "--settle", "1ms", "--no-color", "--json-file", path, srv.URL + "/webhook"}, &out, &errOut)
+	if !strings.Contains(out.String(), "missing-signature") {
+		t.Fatalf("text report missing:\n%s", out.String())
+	}
+	b, err := os.ReadFile(path)
+	if err != nil || !json.Valid(b) {
+		t.Fatalf("json file: %v\n%s", err, b)
+	}
+}
+
+func TestBodyFileValidated(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bad.json")
+	os.WriteFile(path, []byte(`{"id": {{id}}}`), 0o600)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"--scheme", "hook", "--secret", "s", "--body-file", path, "http://localhost/x"}, &out, &errOut); code != exitSetup {
+		t.Fatalf("exit %d, want %d", code, exitSetup)
+	}
+	if !strings.Contains(errOut.String(), "not valid JSON") {
+		t.Fatalf("stderr: %s", errOut.String())
 	}
 }
 

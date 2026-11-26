@@ -145,6 +145,9 @@ func (x *runner) duplicate(ctx context.Context) Result {
 }
 
 func (x *runner) reserializedBody(ctx context.Context) Result {
+	if !x.cfg.Scheme.BodySigned() {
+		return skip(fmt.Sprintf("the %s format does not sign the body, so a valid token covers any body", x.cfg.Scheme.Name()))
+	}
 	m := x.message(x.newID(), "reserialized-body", time.Now(), 0)
 	h, err := x.sign(m, x.cfg.Secret)
 	if err != nil {

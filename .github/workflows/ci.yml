@@ -13,6 +13,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: false
 
       - name: Format
         run: test -z "$(gofmt -l .)"
@@ -33,7 +34,8 @@ jobs:
         run: |
           bin/fixed -addr :8082 &
           for i in $(seq 1 20); do curl -s localhost:8082/__hookprobe/events/x >/dev/null && break; sleep 0.25; done
-          bin/hookprobe --scheme hook --secret demo-secret http://localhost:8082/webhook
+          bin/hookprobe --scheme hook --secret demo-secret --json-file fixed.json http://localhost:8082/webhook
+          test "$(jq '.passed' fixed.json)" = true
 
       - name: Vulnerable receiver fails
         run: |
@@ -46,3 +48,35 @@ jobs:
           echo "exit code $code"
           test "$code" -eq 1
           test "$(jq '.summary.fail' vulnerable.json)" -eq 6
+
+  action:
+    # Runs the action from this checkout against the fixed demo receiver.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Start fixed receiver
+        run: |
+          go build -o /tmp/fixed ./demo/fixed
+          /tmp/fixed -addr :8082 &
+          for i in $(seq 1 40); do curl -s localhost:8082/__hookprobe/events/x >/dev/null && break; sleep 0.25; done
+
+      - name: Probe with the action
+        id: probe
+        uses: ./
+        with:
+          url: http://localhost:8082/webhook
+          scheme: hook
+          secret: demo-secret
+          version: ${{ github.sha }}
+          args: --skip slow-body --body-file examples/stripe-event.json
+
+      - name: Check outputs
+        run: |
+          test "${{ steps.probe.outputs.passed }}" = true
+          jq -e '.passed' "${{ steps.probe.outputs.report }}"

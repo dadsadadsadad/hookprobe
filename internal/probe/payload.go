@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -25,6 +26,33 @@ func buildBody(id, typ, check string, ts time.Time, pad int) []byte {
 		"type":    typ,
 	})
 	return b
+}
+
+// Template placeholders for --body-file. Each is replaced verbatim, so put
+// string placeholders inside quotes: "id": "{{id}}".
+var placeholders = []string{"{{id}}", "{{type}}", "{{created}}", "{{created_rfc3339}}", "{{check}}"}
+
+// RenderTemplate fills a --body-file template and pads it with trailing
+// whitespace (valid JSON) to at least pad extra bytes.
+func RenderTemplate(tmpl []byte, id, typ, check string, ts time.Time, pad int) ([]byte, error) {
+	r := strings.NewReplacer(
+		"{{id}}", id,
+		"{{type}}", typ,
+		"{{created}}", strconv.FormatInt(ts.Unix(), 10),
+		"{{created_rfc3339}}", ts.UTC().Format(time.RFC3339),
+		"{{check}}", check,
+	)
+	out := []byte(r.Replace(string(tmpl)))
+	if !json.Valid(out) {
+		return nil, errors.New("body template is not valid JSON once its placeholders are filled")
+	}
+	if !bytes.Contains(tmpl, []byte("{{id}}")) {
+		return nil, errors.New(`body template has no {{id}} placeholder, so every check would reuse one event ID`)
+	}
+	if pad > 0 {
+		out = append(out, bytes.Repeat([]byte{' '}, pad)...)
+	}
+	return out, nil
 }
 
 // reserialize returns the same JSON value with keys in reverse order and

@@ -23,6 +23,7 @@ func (stripe) Description() string {
 func (stripe) SignatureHeader() string { return "Stripe-Signature" }
 func (stripe) Timestamped() bool       { return true }
 func (stripe) MultiSignature() bool    { return true }
+func (stripe) BodySigned() bool        { return true }
 
 func (stripe) sig(m Message, secret string) string {
 	return hex.EncodeToString(mac([]byte(secret), m.Unix(), ".", string(m.Body)))
@@ -52,6 +53,7 @@ func (s stripe) Variants(m Message, secret string) ([]Variant, error) {
 		{"signature under v0 instead of v1", base.With(h, t+",v0="+valid), false},
 		{"no t= element", base.With(h, "v1="+valid), false},
 		{"truncated signature", base.With(h, t+",v1="+half(valid)), false},
+		{"signature with extra characters", base.With(h, t+",v1="+valid+"00"), false},
 		{"empty header value", base.With(h, ""), false},
 	}, nil
 }

@@ -1,0 +1,20 @@
+{
+  "id": "{{id}}",
+  "object": "event",
+  "api_version": "2024-06-20",
+  "created": {{created}},
+  "type": "{{type}}",
+  "livemode": false,
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "pi_hookprobe",
+      "object": "payment_intent",
+      "amount": 1000,
+      "currency": "usd",
+      "status": "succeeded",
+      "metadata": { "hookprobe_check": "{{check}}" }
+    }
+  }
+}

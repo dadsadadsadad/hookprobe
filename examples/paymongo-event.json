@@ -1,0 +1,23 @@
+{
+  "data": {
+    "id": "{{id}}",
+    "type": "event",
+    "attributes": {
+      "type": "{{type}}",
+      "livemode": false,
+      "data": {
+        "id": "pay_hookprobe",
+        "type": "payment",
+        "attributes": {
+          "amount": 10000,
+          "currency": "PHP",
+          "status": "paid",
+          "description": "hookprobe {{check}}"
+        }
+      },
+      "previous_data": {},
+      "created_at": {{created}},
+      "updated_at": {{created}}
+    }
+  }
+}

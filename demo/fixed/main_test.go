@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -11,6 +12,21 @@ import (
 )
 
 func TestFixedReceiverPassesEveryCheck(t *testing.T) {
+	runFixed(t, nil)
+}
+
+// A provider-shaped body must not change the verdict: the receiver verifies
+// bytes, whatever they spell.
+func TestFixedReceiverPassesWithBodyTemplate(t *testing.T) {
+	tmpl, err := os.ReadFile("../../examples/stripe-event.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runFixed(t, tmpl)
+}
+
+func runFixed(t *testing.T, bodyTemplate []byte) {
+	t.Helper()
 	srv := httptest.NewUnstartedServer(nil)
 	srv.Config = newServer("", newReceiver("demo-secret").routes())
 	srv.Config.ReadTimeout = time.Second // keep the slow-body check short
@@ -22,6 +38,7 @@ func TestFixedReceiverPassesEveryCheck(t *testing.T) {
 		URL:           srv.URL + "/webhook",
 		Scheme:        hook,
 		Secret:        "demo-secret",
+		BodyTemplate:  bodyTemplate,
 		Oracle:        probe.HTTPOracle{Template: srv.URL + "/__hookprobe/events/{id}"},
 		ReplayDelay:   50 * time.Millisecond,
 		Settle:        10 * time.Millisecond,

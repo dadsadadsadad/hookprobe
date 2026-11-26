@@ -2,7 +2,10 @@ package probe
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -33,6 +36,41 @@ func TestReserializeKeepsValueChangesBytes(t *testing.T) {
 	}
 	if string(alt) == string(b) {
 		t.Fatal("bytes did not change")
+	}
+}
+
+func TestExampleTemplatesRender(t *testing.T) {
+	files, _ := filepath.Glob("../../examples/*.json")
+	if len(files) == 0 {
+		t.Fatal("no example templates found")
+	}
+	for _, f := range files {
+		tmpl, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := RenderTemplate(tmpl, "evt_9", "payment.paid", "baseline", time.Unix(1760000000, 0), 10)
+		if err != nil {
+			t.Errorf("%s: %v", f, err)
+			continue
+		}
+		if !strings.Contains(string(out), `"evt_9"`) || !strings.HasSuffix(string(out), "          ") {
+			t.Errorf("%s: id or padding missing", f)
+		}
+		if _, err := reserialize(out); err != nil {
+			t.Errorf("%s: %v", f, err)
+		}
+	}
+}
+
+func TestRenderTemplateRejectsBadTemplates(t *testing.T) {
+	for name, tmpl := range map[string]string{
+		"unquoted string": `{"id": {{id}}}`,
+		"no id":           `{"type": "{{type}}"}`,
+	} {
+		if _, err := RenderTemplate([]byte(tmpl), "evt_1", "t", "c", time.Now(), 0); err == nil {
+			t.Errorf("%s: want an error", name)
+		}
 	}
 }
 

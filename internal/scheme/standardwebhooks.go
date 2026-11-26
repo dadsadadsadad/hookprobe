@@ -27,6 +27,7 @@ func (standardWebhooks) Description() string {
 func (standardWebhooks) SignatureHeader() string { return "webhook-signature" }
 func (standardWebhooks) Timestamped() bool       { return true }
 func (standardWebhooks) MultiSignature() bool    { return true }
+func (standardWebhooks) BodySigned() bool        { return true }
 
 func standardKey(secret string) []byte {
 	if rest, ok := strings.CutPrefix(secret, "whsec_"); ok {
@@ -74,6 +75,7 @@ func v1Variants(base Headers, header, respelled, respelledName, valid string) []
 		{"no v1, prefix", base.With(header, valid), false},
 		{"v1, prefix with no signature", base.With(header, "v1,"), false},
 		{"truncated signature", base.With(header, "v1,"+half(valid)), false},
+		{"signature with extra characters", base.With(header, "v1,"+valid+"AAAA"), false},
 		{"empty header value", base.With(header, ""), false},
 	}
 }

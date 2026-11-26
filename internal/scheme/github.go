@@ -23,6 +23,7 @@ func (github) Description() string {
 func (github) SignatureHeader() string { return "X-Hub-Signature-256" }
 func (github) Timestamped() bool       { return false }
 func (github) MultiSignature() bool    { return false }
+func (github) BodySigned() bool        { return true }
 
 func (github) sig(m Message, secret string) string {
 	return hex.EncodeToString(mac([]byte(secret), string(m.Body)))
@@ -51,6 +52,7 @@ func (g github) Variants(m Message, secret string) ([]Variant, error) {
 		{"sha1= prefix on a SHA-256 value", base.With(h, "sha1="+valid), false},
 		{"no sha256= prefix", base.With(h, valid), false},
 		{"truncated signature", base.With(h, "sha256="+half(valid)), false},
+		{"signature with extra characters", base.With(h, "sha256="+valid+"00"), false},
 		{"empty header value", base.With(h, ""), false},
 	}, nil
 }

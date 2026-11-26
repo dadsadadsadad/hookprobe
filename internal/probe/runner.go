@@ -37,12 +37,17 @@ func randomSecret() string {
 }
 
 func (x *runner) message(id, check string, ts time.Time, pad int) scheme.Message {
+	body := buildBody(id, x.cfg.EventType, check, ts, pad)
+	if x.cfg.BodyTemplate != nil {
+		// Validated up front by Run, so an error here cannot happen.
+		body, _ = RenderTemplate(x.cfg.BodyTemplate, id, x.cfg.EventType, check, ts, pad)
+	}
 	return scheme.Message{
 		ID:        id,
 		Type:      x.cfg.EventType,
 		Timestamp: ts,
 		Attempt:   1,
-		Body:      buildBody(id, x.cfg.EventType, check, ts, pad),
+		Body:      body,
 	}
 }
 
@@ -72,7 +77,7 @@ func (x *runner) send(ctx context.Context, body []byte, h scheme.Headers) respon
 		return response{err: err}
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", userAgent())
 	for _, kv := range h {
 		// Assign directly so the name goes on the wire exactly as spelled.
 		req.Header[kv.Name] = append(req.Header[kv.Name], kv.Value)
@@ -259,7 +264,7 @@ func (x *runner) slowSend(ctx context.Context, body []byte, h scheme.Headers) sl
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "POST %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\n",
-		u.RequestURI(), u.Host, userAgent, len(body))
+		u.RequestURI(), u.Host, userAgent(), len(body))
 	for _, kv := range h {
 		fmt.Fprintf(&b, "%s: %s\r\n", kv.Name, kv.Value)
 	}

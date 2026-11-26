@@ -31,6 +31,7 @@ func (hook) Description() string {
 func (hook) SignatureHeader() string { return "X-Hook-Signature" }
 func (hook) Timestamped() bool       { return true }
 func (hook) MultiSignature() bool    { return true }
+func (hook) BodySigned() bool        { return true }
 
 func (hook) sig(m Message, secret string) string {
 	return base64.StdEncoding.EncodeToString(

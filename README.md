@@ -26,7 +26,13 @@ Most webhook bugs are on the receiving end: signature checks that run on parsed 
 
 "Rejects" means a 4xx status **and** the event was not processed. A receiver that answers 401 but runs the handler anyway fails. A 5xx counts as a failure, because senders retry on 5xx.
 
-Some checks do not apply to every format. GitHub signatures cover no timestamp and carry one signature, so checks 4 and 10 are reported as `SKIP` for `--scheme github`. Skips do not fail the run.
+Some checks do not apply to every format, and those are reported as `SKIP` with the reason. Skips do not fail the run.
+
+| Format | Skipped | Why |
+|--------|---------|-----|
+| `github` | 4, 10 | no signed timestamp, one signature per request |
+| `paymongo`, `paymongo-live` | 10 | one signature per request |
+| `xendit` | 4, 6, 10 | a static token: no timestamp, no body signature, no rotation |
 
 ## Signature schemes
 
@@ -34,38 +40,54 @@ Some checks do not apply to every format. GitHub signatures cover no timestamp a
 $ hookprobe schemes
 github             X-Hub-Signature-256: sha256=<hex HMAC-SHA256 of body>, X-GitHub-Delivery: <id>
 hook               X-Hook-Signature: v1,<base64 HMAC-SHA256 of "event_id.timestamp.body">
+paymongo           Paymongo-Signature: t=<unix>,te=<hex HMAC-SHA256 of "t.body">,li=
+paymongo-live      Paymongo-Signature: t=<unix>,te=,li=<hex HMAC-SHA256 of "t.body">
 standard-webhooks  webhook-signature: v1,<base64 HMAC-SHA256 of "id.timestamp.body">
 stripe             Stripe-Signature: t=<unix>,v1=<hex HMAC-SHA256 of "t.body">
+xendit             x-callback-token: <verification token> (static token, body not signed)
 ```
 
 - **stripe**: the full secret string (`whsec_...`) is the HMAC key, as in Stripe's libraries.
 - **github**: `X-Hub-Signature-256`, with the event ID in `X-GitHub-Delivery`.
 - **standard-webhooks**: [standardwebhooks.com](https://www.standardwebhooks.com). A `whsec_<base64>` secret is base64-decoded into the key.
-- **hook**: the format of my [Reliable Webhook Delivery Service](https://github.com/dadsadadsadad/webhook-delivery-service) (section 10 of its spec): `X-Hook-Event-Id`, `X-Hook-Timestamp`, `X-Hook-Attempt`, and `X-Hook-Signature` with space-separated `v1,` signatures during rotation.
+- **paymongo** / **paymongo-live**: the signature goes in `te` for test-mode events and in `li` for live ones. Pass the webhook's secret key as `--secret`. The event ID is `data.id` in the body, so use `--body-file examples/paymongo-event.json`.
+- **xendit**: Xendit does not sign the payload. Each callback carries the account's verification token, so pass that token as `--secret`. With no signature over the body and no timestamp, deduping the event ID is the only replay protection, and checks 3 and 5 matter most.
+- **hook**: the format of my Reliable Webhook Delivery Service: `X-Hook-Event-Id`, `X-Hook-Timestamp`, `X-Hook-Attempt`, and `X-Hook-Signature` with space-separated `v1,` signatures during rotation. The key is the whole secret string, `whsec_` prefix included.
 
-The Stripe, GitHub and Standard Webhooks implementations are tested against the reference vectors those projects publish.
+The Stripe, GitHub, Standard Webhooks and `hook` implementations are tested against the reference vectors those projects publish.
+
+### Provider-shaped payloads
+
+By default HookProbe sends a small generic event. Receivers built on a provider's library usually parse the event before trusting it (Stripe's library checks `api_version`, for example) and would reject the generic one in the baseline. Give them a real-looking event instead:
+
+```
+hookprobe --scheme stripe --body-file examples/stripe-event.json http://localhost:8080/webhooks/stripe
+```
+
+A template is any JSON file with placeholders. `{{id}}` is required (every check needs its own event ID), and the others are optional: `{{type}}`, `{{created}}` (unix seconds), `{{created_rfc3339}}` and `{{check}}`. Placeholders are replaced verbatim, so quote the string ones: `"id": "{{id}}"`. `examples/` has starting points for Stripe, PayMongo and Xendit. Set `api_version` and similar fields to whatever your receiver expects.
 
 ### Adding a scheme
 
-A scheme is one file in `internal/scheme/` that implements `scheme.Scheme` and registers itself:
+A scheme is one file in `internal/scheme/` that implements `scheme.Scheme` and registers itself. For a made-up provider:
 
 ```go
 package scheme
 
-type paymongo struct{}
+type acmepay struct{}
 
-func init() { Register(paymongo{}) }
+func init() { Register(acmepay{}) }
 
-func (paymongo) Name() string            { return "paymongo" }
-func (paymongo) Description() string     { return "Paymongo-Signature: t=<unix>,te=<hex>,li=<hex>" }
-func (paymongo) SignatureHeader() string { return "Paymongo-Signature" }
-func (paymongo) Timestamped() bool       { return true }
-func (paymongo) MultiSignature() bool    { return false }
-func (paymongo) Sign(m Message, secrets ...string) (Headers, error)    { /* ... */ }
-func (paymongo) Variants(m Message, secret string) ([]Variant, error) { /* ... */ }
+func (acmepay) Name() string            { return "acmepay" }
+func (acmepay) Description() string     { return "Acme-Signature: <hex HMAC-SHA256 of body>" }
+func (acmepay) SignatureHeader() string { return "Acme-Signature" }
+func (acmepay) Timestamped() bool       { return false }
+func (acmepay) MultiSignature() bool    { return false }
+func (acmepay) BodySigned() bool        { return true }
+func (acmepay) Sign(m Message, secrets ...string) (Headers, error)    { /* ... */ }
+func (acmepay) Variants(m Message, secret string) ([]Variant, error) { /* ... */ }
 ```
 
-`Sign` returns every header the format needs. `Variants` returns respelled and malformed copies of a valid signature header for check 9. Nothing else in the code base has to change. `--scheme paymongo` and `hookprobe schemes` pick it up automatically.
+`Sign` returns every header the format needs. `Variants` returns respelled and malformed copies of a valid signature header for check 9. Nothing else in the code base has to change. `--scheme acmepay` and `hookprobe schemes` pick it up automatically. `paymongo.go` and `xendit.go` are short, complete examples.
 
 ## How HookProbe knows an event was processed
 
@@ -112,7 +134,7 @@ hookprobe --scheme hook --secret demo-secret http://localhost:8082/webhook
 **Before** (`demo/vulnerable`, exit code 1):
 
 ```
-hookprobe 0.1.0
+hookprobe 0.2.0
   target  http://localhost:8081/webhook
   scheme  hook
   oracle  http://localhost:8081/__hookprobe/events/{id}
@@ -150,13 +172,13 @@ hookprobe 0.1.0
   PASS   9  header-variants      Signature header case and format variations
   PASS  10  multiple-signatures  Several signatures in one header (rotation)
 
-  FAIL  5 passed, 6 failed, 0 skipped, 0 errors in 27.5s
+  FAIL  5 passed, 6 failed, 0 skipped, 0 errors in 27.9s
 ```
 
 **After** (`demo/fixed`, exit code 0):
 
 ```
-hookprobe 0.1.0
+hookprobe 0.2.0
   target  http://localhost:8082/webhook
   scheme  hook
   oracle  http://localhost:8082/__hookprobe/events/{id}
@@ -173,18 +195,22 @@ hookprobe 0.1.0
   PASS   9  header-variants      Signature header case and format variations
   PASS  10  multiple-signatures  Several signatures in one header (rotation)
 
-  PASS  11 passed, 0 failed, 0 skipped, 0 errors in 12.5s
+  PASS  11 passed, 0 failed, 0 skipped, 0 errors in 12.9s
 ```
 
 Diff the two files in `demo/` to see exactly what each fix costs. Both reports are pinned by tests (`go test ./demo/...`), so the README cannot drift from the code.
 
 ## Install
 
+Download a binary for Linux, macOS or Windows from the [releases page](https://github.com/dadsadadsadad/hookprobe/releases) (checksums in `checksums.txt`), or build from source:
+
 ```
 go install github.com/dadsadadsadad/hookprobe/cmd/hookprobe@latest
 ```
 
-Requires Go 1.27 or later. No third-party dependencies.
+Building needs Go 1.27 or later. There are no third-party dependencies.
+
+How it works inside: [ARCHITECTURE.md](ARCHITECTURE.md). Why it works that way: [DESIGN-NOTES.md](DESIGN-NOTES.md).
 
 ## Usage
 
@@ -195,7 +221,7 @@ hookprobe schemes | checks | version
 
 | Flag | Default | |
 |------|---------|--|
-| `--scheme` | required | `stripe`, `github`, `standard-webhooks`, `hook` |
+| `--scheme` | required | `stripe`, `github`, `standard-webhooks`, `hook`, `paymongo`, `paymongo-live`, `xendit` |
 | `--secret` | `$HOOKPROBE_SECRET` | the secret the receiver holds. Prefer the environment variable to keep it out of shell history |
 | `--processed-url` | `<origin>/__hookprobe/events/{id}` | oracle endpoint |
 | `--processed-cmd` | | oracle command, instead of the endpoint |
@@ -208,7 +234,9 @@ hookprobe schemes | checks | version
 | `--timeout` | `10s` | per-request timeout |
 | `--only`, `--skip` | | comma-separated check numbers or keys, e.g. `--skip slow-body` |
 | `--event-type` | `hookprobe.test` | type in the payload and type headers, if your receiver routes on it |
+| `--body-file` | | JSON payload template (see [Provider-shaped payloads](#provider-shaped-payloads)) |
 | `--json` | `false` | machine-readable report on stdout |
+| `--json-file` | | also write the JSON report to a file, keeping the text report on stdout |
 | `-v` | `false` | show details for passing checks too |
 | `--no-color` | `false` | also honors `NO_COLOR` |
 | `--insecure` | `false` | skip TLS verification, for self-signed test servers only |
@@ -230,7 +258,7 @@ Flags can come before or after the URL.
 ```json
 {
   "tool": "hookprobe",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "passed": false,
   "summary": { "pass": 2, "fail": 1, "skip": 0, "error": 0 },
   "target": "http://localhost:8081/webhook",
@@ -252,18 +280,47 @@ Flags can come before or after the URL.
 
 ## GitHub Actions
 
-Start the receiver in test mode, then run HookProbe. A failed check fails the job.
+Start the receiver in test mode, then use the action. A failed check fails the job. The text report goes to the log, and the JSON report is written to a file you can upload as an artifact.
 
 ```yaml
 - name: Probe webhook receiver
-  env:
-    HOOKPROBE_SECRET: ${{ secrets.WEBHOOK_TEST_SECRET }}
-  run: |
-    go install github.com/dadsadadsadad/hookprobe/cmd/hookprobe@latest
-    hookprobe --scheme stripe --json http://localhost:8080/webhooks/stripe > hookprobe.json
+  id: hookprobe
+  uses: dadsadadsadad/hookprobe@v0.2.0
+  with:
+    url: http://localhost:8080/webhooks/stripe
+    scheme: stripe
+    secret: ${{ secrets.WEBHOOK_TEST_SECRET }}
+    args: --body-file examples/stripe-event.json
+
+- uses: actions/upload-artifact@v4
+  if: always()
+  with:
+    name: hookprobe-report
+    path: ${{ steps.hookprobe.outputs.report }}
 ```
 
-This repository's own workflow (`.github/workflows/ci.yml`) runs the unit tests, then probes both demo receivers and asserts that the fixed one exits 0 and the vulnerable one exits 1.
+| Input | Default | |
+|-------|---------|--|
+| `url` | required | receiver URL |
+| `scheme` | required | signature format |
+| `secret` | required | signing secret, from a repository secret |
+| `args` | | any other flags |
+| `version` | `latest` | HookProbe version to install |
+| `report` | `hookprobe-report.json` | where to write the JSON report |
+
+Outputs: `passed` (`"true"` or `"false"`) and `report` (the JSON report's path).
+
+Without the action, it is one command:
+
+```yaml
+- run: |
+    go install github.com/dadsadadsadad/hookprobe/cmd/hookprobe@latest
+    hookprobe --scheme stripe --json-file hookprobe.json http://localhost:8080/webhooks/stripe
+  env:
+    HOOKPROBE_SECRET: ${{ secrets.WEBHOOK_TEST_SECRET }}
+```
+
+This repository's own workflow (`.github/workflows/ci.yml`) runs the unit tests, probes both demo receivers (asserting that the fixed one exits 0 and the vulnerable one exits 1), and runs the action itself against the fixed receiver.
 
 ## Limits
 

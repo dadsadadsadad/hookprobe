@@ -91,6 +91,9 @@ type Scheme interface {
 	Timestamped() bool
 	// MultiSignature reports whether one header can carry several signatures.
 	MultiSignature() bool
+	// BodySigned reports whether the signature covers the request body.
+	// Static-token formats return false.
+	BodySigned() bool
 	// Variants returns header spellings and malformed values to try, built
 	// from a valid signature of m.
 	Variants(m Message, secret string) ([]Variant, error)

@@ -83,6 +83,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		processedCmd = fs.String("processed-cmd", "", "oracle command with {id} that prints the processed count")
 		statusOnly   = fs.Bool("status-only", false, "no oracle: judge by status codes only and skip replay and duplicate checks")
 		eventType    = fs.String("event-type", "hookprobe.test", "event type put in the payload and type headers")
+		bodyFile     = fs.String("body-file", "", "JSON payload template with {{id}}, {{type}}, {{created}}, {{created_rfc3339}}, {{check}} (see examples/)")
 		tolerance    = fs.Duration("tolerance", 5*time.Minute, "receiver's timestamp tolerance window")
 		replayDelay  = fs.Duration("replay-delay", 2*time.Second, "wait before replaying a captured request")
 		settle       = fs.Duration("settle", 300*time.Millisecond, "wait before asking the oracle, for receivers that process asynchronously")
@@ -92,6 +93,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		only         = fs.String("only", "", "comma-separated checks to run, by number or key")
 		skipList     = fs.String("skip", "", "comma-separated checks to skip, by number or key")
 		asJSON       = fs.Bool("json", false, "print a JSON report instead of text")
+		jsonFile     = fs.String("json-file", "", "also write the JSON report to this file (keeps the text report on stdout)")
 		verbose      = fs.Bool("v", false, "show details for passing checks too")
 		noColor      = fs.Bool("no-color", false, "disable colors (also honors $NO_COLOR)")
 		insecure     = fs.Bool("insecure", false, "skip TLS certificate verification (self-signed test servers only)")
@@ -141,6 +143,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return fail("--oversize: %v", err)
 	}
 
+	var bodyTemplate []byte
+	if *bodyFile != "" {
+		bodyTemplate, err = os.ReadFile(*bodyFile)
+		if err != nil {
+			return fail("--body-file: %v", err)
+		}
+		if _, err := probe.RenderTemplate(bodyTemplate, "evt_check", *eventType, "baseline", time.Now(), 0); err != nil {
+			return fail("--body-file %s: %v", *bodyFile, err)
+		}
+	}
+
 	var oracle probe.Oracle
 	switch {
 	case *statusOnly && (*processedURL != "" || *processedCmd != ""):
@@ -171,6 +184,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		Scheme:        sch,
 		Secret:        *secret,
 		EventType:     *eventType,
+		BodyTemplate:  bodyTemplate,
 		Oracle:        oracle,
 		Tolerance:     *tolerance,
 		ReplayDelay:   *replayDelay,
@@ -206,6 +220,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 	} else {
 		text.Summary(rep)
+	}
+	if *jsonFile != "" {
+		f, err := os.Create(*jsonFile)
+		if err != nil {
+			return fail("--json-file: %v", err)
+		}
+		err = report.JSON(f, rep)
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+		if err != nil {
+			return fail("--json-file: %v", err)
+		}
 	}
 
 	switch {

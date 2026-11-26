@@ -13,10 +13,11 @@ import (
 	"github.com/dadsadadsadad/hookprobe/internal/scheme"
 )
 
-// Version is the HookProbe release.
-const Version = "0.1.0"
+// Version is the HookProbe release. Release builds set it with
+// -ldflags "-X github.com/dadsadadsadad/hookprobe/internal/probe.Version=...".
+var Version = "0.2.0"
 
-const userAgent = "hookprobe/" + Version
+func userAgent() string { return "hookprobe/" + Version }
 
 // Status is the outcome of one check.
 type Status string
@@ -83,6 +84,11 @@ type Config struct {
 	Scheme    scheme.Scheme
 	Secret    string
 	EventType string
+
+	// BodyTemplate replaces the built-in payload with a JSON template using
+	// {{id}}, {{type}}, {{created}}, {{created_rfc3339}} and {{check}}.
+	// Check it with RenderTemplate before calling Run.
+	BodyTemplate []byte
 
 	// Oracle reports how many times the receiver processed an event. Nil
 	// means status-only mode: checks that need a count are skipped.
